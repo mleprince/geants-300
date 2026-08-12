@@ -1,0 +1,501 @@
+/* ==========================================================================
+   Les Géants 300 — piste C : carte plein écran, ravitos, bandeau profil
+   Mobile d'abord. Sur grand écran, l'app est centrée dans une colonne.
+   ========================================================================== */
+
+:root{
+  --bg:#F2F4F1;
+  --surface:#FFFFFF;
+  --surface-2:#E9EDE6;
+  --ink:#182019;
+  --muted:#68726B;
+  --line:#DDE3DB;
+  --line-strong:#C7D0C4;
+  --accent:#3D7A4B;
+  --accent-ink:#FFFFFF;
+
+  /* types de POI */
+  --t-water:#2E77B8;
+  --t-bread:#C06A1E;
+  --t-shop:#7A4E9B;
+  --t-col:#1D4E2E;
+  --t-cem:#8A9391;
+
+  /* pentes — mêmes rôles que la légende historique */
+  --flat:#7D8F83;
+  --climb-mod:#D99A3D;
+  --climb-steep:#B93425;
+  --descent:#2F7A72;
+
+  /* sémantique */
+  --ok:#2E7D4F;
+  --soon:#B07A16;
+  --shut:#B4402F;
+
+  --shadow-sheet:0 -3px 18px rgba(20,30,24,.13);
+  --shadow-fab:0 2px 8px rgba(20,30,24,.20);
+
+  /* poignée + bandeau profil + en-tête de groupe + 2 lignes de ravito */
+  --sheet-peek:246px;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1512;
+    --surface:#161F1A;
+    --surface-2:#1D2822;
+    --ink:#E4EBE5;
+    --muted:#93A098;
+    --line:#26332C;
+    --line-strong:#35453B;
+    --accent:#63B377;
+    --accent-ink:#0F1512;
+
+    --t-water:#5FA3DC;
+    --t-bread:#E09A4E;
+    --t-shop:#B08AD0;
+    --t-col:#5CA872;
+    --t-cem:#7A857E;
+
+    --flat:#8FA295;
+    --climb-mod:#E9AC5C;
+    --climb-steep:#E2604C;
+    --descent:#57B0A6;
+
+    --ok:#5CB27C;
+    --soon:#D9AC55;
+    --shut:#E0705C;
+
+    --shadow-sheet:0 -3px 20px rgba(0,0,0,.45);
+    --shadow-fab:0 2px 10px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1512;
+  --surface:#161F1A;
+  --surface-2:#1D2822;
+  --ink:#E4EBE5;
+  --muted:#93A098;
+  --line:#26332C;
+  --line-strong:#35453B;
+  --accent:#63B377;
+  --accent-ink:#0F1512;
+
+  --t-water:#5FA3DC;
+  --t-bread:#E09A4E;
+  --t-shop:#B08AD0;
+  --t-col:#5CA872;
+  --t-cem:#7A857E;
+
+  --flat:#8FA295;
+  --climb-mod:#E9AC5C;
+  --climb-steep:#E2604C;
+  --descent:#57B0A6;
+
+  --ok:#5CB27C;
+  --soon:#D9AC55;
+  --shut:#E0705C;
+
+  --shadow-sheet:0 -3px 20px rgba(0,0,0,.45);
+  --shadow-fab:0 2px 10px rgba(0,0,0,.5);
+}
+
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:15px;
+  line-height:1.4;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+button{font:inherit;color:inherit;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+/* ---------- coquille ---------- */
+.app{
+  height:100dvh;
+  display:flex;
+  flex-direction:column;
+  max-width:560px;
+  margin:0 auto;
+  background:var(--bg);
+  position:relative;
+  overflow:hidden;
+}
+@media (min-width:600px){
+  body{background:var(--surface-2);}
+  .app{border-left:1px solid var(--line);border-right:1px solid var(--line);}
+}
+
+.views{flex:1;min-height:0;position:relative;}
+.view{
+  position:absolute;inset:0;
+  display:none;
+  flex-direction:column;
+  min-height:0;
+}
+.view.is-active{display:flex;}
+.view-scroll{
+  flex:1;min-height:0;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+}
+
+/* ---------- barre de titre ---------- */
+.topbar{
+  flex:0 0 auto;
+  display:flex;align-items:baseline;gap:10px;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  background:var(--bg);
+}
+.topbar h1{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;}
+.topbar .meta{
+  margin-left:auto;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;text-align:right;
+}
+
+/* ---------- carte ---------- */
+.map-area{position:relative;flex:1;min-height:0;background:var(--surface-2);}
+#leaflet-map{position:absolute;inset:0;background:var(--surface-2);}
+.leaflet-container{font:inherit;background:var(--surface-2);}
+.leaflet-control-attribution{font-size:9px;opacity:.7;}
+
+.chips{
+  position:absolute;top:10px;left:0;right:0;z-index:500;
+  display:flex;gap:6px;padding:0 12px;
+  overflow-x:auto;scrollbar-width:none;
+}
+.chips::-webkit-scrollbar{display:none;}
+.chip{
+  flex:0 0 auto;
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:7px 12px;
+  font-size:12.5px;font-weight:500;white-space:nowrap;
+  box-shadow:0 1px 3px rgba(20,30,24,.14);
+  cursor:pointer;
+}
+.chip .d{width:8px;height:8px;border-radius:50%;flex:0 0 auto;}
+.chip[aria-pressed="false"]{opacity:.45;}
+
+.fab{
+  position:absolute;right:12px;z-index:500;
+  width:44px;height:44px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--line);
+  display:grid;place-items:center;
+  box-shadow:var(--shadow-fab);font-size:17px;cursor:pointer;
+}
+.fab.active{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+
+/* ---------- feuille glissante ---------- */
+.sheet{
+  flex:0 0 auto;
+  position:relative;z-index:600;
+  background:var(--surface);
+  border-radius:18px 18px 0 0;
+  margin-top:-16px;
+  box-shadow:var(--shadow-sheet);
+  display:flex;flex-direction:column;
+  height:var(--sheet-peek);
+  min-height:0;
+  transition:height .26s cubic-bezier(.22,.61,.36,1);
+}
+/* Dépliée, la feuille n'a plus de carte à chevaucher : on annule la marge
+   négative pour ne pas manger le titre. Sa hauteur est mesurée en JS —
+   un simple 100 % déborderait sous la barre d'onglets. */
+.sheet.is-full{margin-top:0;}
+.sheet.is-dragging{transition:none;}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none;}}
+
+.sheet-grab{
+  flex:0 0 auto;padding:7px 0 3px;cursor:grab;touch-action:none;
+  background:none;border:none;width:100%;display:block;
+}
+.sheet-grab .bar{
+  display:block;width:36px;height:4px;border-radius:2px;
+  background:var(--line-strong);margin:0 auto;
+}
+
+/* ---------- bandeau profil ---------- */
+.strip{
+  flex:0 0 auto;
+  padding:2px 14px 8px;
+  border:none;border-bottom:1px solid var(--line);
+  background:none;width:100%;text-align:left;cursor:pointer;
+}
+.strip-top{display:flex;justify-content:space-between;align-items:baseline;padding:0 2px 4px;gap:10px;}
+.strip-top .lbl{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
+.strip-top .val{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+/* `display:block` est indispensable : c'est un <span>, et une boîte inline
+   ignorerait la hauteur, laissant le SVG prendre sa taille intrinsèque. */
+.strip-plot{display:block;position:relative;height:44px;}
+.strip-plot svg{display:block;width:100%;height:100%;}
+.strip-axis{
+  display:flex;justify-content:space-between;padding:3px 2px 0;
+  font-size:9px;color:var(--muted);font-variant-numeric:tabular-nums;
+}
+
+.mk-col{position:absolute;top:0;bottom:0;width:1px;background:color-mix(in srgb,var(--ink) 22%,transparent);}
+.mk-poi{
+  position:absolute;width:6px;height:6px;border-radius:50%;
+  margin-left:-3px;margin-top:-3px;border:1px solid var(--surface);
+}
+.mk-you{
+  position:absolute;width:13px;height:13px;border-radius:50%;
+  margin-left:-6.5px;margin-top:-6.5px;
+  background:var(--accent);border:3px solid var(--surface);
+  box-shadow:0 0 0 1px var(--accent);
+}
+.mk-pause{position:absolute;top:0;bottom:0;width:2px;background:var(--climb-steep);opacity:.75;}
+
+/* ---------- liste de POI ---------- */
+.poilist{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+.grp{
+  position:sticky;top:0;z-index:1;
+  display:flex;justify-content:space-between;gap:10px;
+  padding:9px 16px 5px;background:var(--surface);
+  font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);
+}
+.poi{
+  display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;
+  padding:9px 16px;border:none;border-top:1px solid var(--line);
+  width:100%;background:none;text-align:left;cursor:pointer;
+}
+.poi:active{background:var(--surface-2);}
+.ic{
+  width:28px;height:28px;border-radius:9px;
+  display:grid;place-items:center;font-size:13px;
+  color:#fff;flex:0 0 auto;
+}
+.poi .nm{font-size:13.5px;font-weight:600;line-height:1.25;display:block;}
+.poi .sub{
+  margin:2px 0 0;font-size:11px;color:var(--muted);
+  display:flex;gap:7px;align-items:center;flex-wrap:wrap;
+  font-variant-numeric:tabular-nums;
+}
+.poi .dist{text-align:right;flex:0 0 auto;}
+.poi .dist b{
+  display:block;font-size:14.5px;font-weight:700;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+.poi .dist i{
+  display:block;font-style:normal;font-size:10.5px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.hrs{display:inline-flex;align-items:center;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:600;}
+.hrs.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);}
+.hrs.unk{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted);}
+
+.empty{padding:22px 16px;color:var(--muted);font-size:13.5px;text-align:center;}
+
+/* ---------- onglets ---------- */
+.tabbar{
+  flex:0 0 auto;
+  display:grid;grid-template-columns:repeat(4,1fr);
+  border-top:1px solid var(--line);
+  background:var(--surface);
+  padding:7px 0 calc(env(safe-area-inset-bottom) + 8px);
+}
+.tabbar button{
+  background:none;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:2px 0;font-size:10px;color:var(--muted);
+}
+.tabbar button .ti{
+  width:20px;height:20px;display:block;
+  stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.tabbar button[aria-selected="true"]{color:var(--accent);font-weight:600;}
+
+/* ---------- vue profil ---------- */
+.pv-head{
+  flex:0 0 auto;display:flex;align-items:baseline;gap:10px;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;
+}
+.pv-head h1{margin:0;font-size:17px;font-weight:700;letter-spacing:-.02em;}
+.pv-head .meta{margin-left:auto;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.pv-plot{
+  position:relative;flex:0 0 auto;
+  background:var(--surface);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  touch-action:none;
+}
+.pv-plot svg{display:block;width:100%;height:230px;}
+.pv-lbl{
+  position:absolute;font-size:9px;color:var(--ink);
+  background:color-mix(in srgb,var(--surface) 85%,transparent);
+  border-radius:3px;padding:0 3px;transform:translateX(-50%);
+  white-space:nowrap;pointer-events:none;
+}
+.pv-scope{display:flex;gap:6px;padding:10px 16px 4px;overflow-x:auto;scrollbar-width:none;}
+.pv-scope::-webkit-scrollbar{display:none;}
+.pv-scope button{
+  flex:0 0 auto;background:var(--surface);border:1px solid var(--line);
+  border-radius:8px;padding:6px 11px;font-size:12px;color:var(--muted);cursor:pointer;
+}
+.pv-scope button[aria-pressed="true"]{
+  background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600;
+}
+.legend{display:flex;flex-wrap:wrap;gap:10px;padding:8px 16px 10px;font-size:10.5px;color:var(--muted);}
+.legend span{display:inline-flex;align-items:center;gap:5px;}
+.legend i{width:14px;height:4px;border-radius:2px;flex:0 0 auto;}
+
+/* ---------- vues pauses / plan ---------- */
+.sec-head{
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  padding:14px 16px 6px;
+}
+.sec-head h2{
+  margin:0;font-size:13px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;
+}
+.sec-head .hint{font-size:11.5px;color:var(--muted);}
+
+.band{
+  margin:12px 16px;padding:12px 14px;border-radius:12px;
+  background:var(--accent);color:var(--accent-ink);
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+}
+.band .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;opacity:.82;display:block;}
+.band b{font-size:21px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+
+.sugg{display:flex;flex-wrap:wrap;gap:7px;padding:0 16px 12px;}
+.sugg button{
+  border:1px solid var(--line);background:var(--surface);
+  border-radius:999px;padding:7px 12px;font-size:12px;cursor:pointer;
+  font-variant-numeric:tabular-nums;
+}
+.sugg button[aria-pressed="true"]{
+  background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600;
+}
+
+.prow{
+  display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;
+  padding:11px 16px;border-top:1px solid var(--line);background:var(--surface);
+}
+.prow .nm{font-size:13.5px;font-weight:600;display:block;}
+.prow .sub{margin:1px 0 0;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.step{display:flex;align-items:center;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+.step button{
+  background:none;border:none;padding:7px 11px;font-size:15px;line-height:1;
+  color:var(--muted);cursor:pointer;
+}
+.step button:active{background:var(--surface-2);}
+.step b{
+  padding:6px 8px;font-size:12.5px;font-variant-numeric:tabular-nums;
+  border-left:1px solid var(--line);border-right:1px solid var(--line);
+}
+.rm{background:none;border:none;color:var(--muted);font-size:19px;line-height:1;padding:4px 6px;cursor:pointer;}
+
+.addform{
+  margin:12px 16px;padding:12px;border:1px dashed var(--line-strong);
+  border-radius:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+.addform .field{display:flex;flex-direction:column;gap:4px;}
+.addform .field.wide{grid-column:1 / -1;}
+.addform label{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);}
+.addform input{
+  font:inherit;font-size:15px;padding:9px 10px;
+  border:1px solid var(--line);border-radius:9px;
+  background:var(--bg);color:var(--ink);width:100%;
+}
+.addform input.invalid{border-color:var(--shut);}
+.btn{
+  grid-column:1 / -1;
+  background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);
+  border-radius:10px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;
+}
+
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:520px;}
+th,td{padding:9px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line);}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;}
+th{
+  font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;background:var(--surface-2);
+}
+th:first-child{background:var(--surface-2);}
+td{font-variant-numeric:tabular-nums;background:var(--surface);}
+td:first-child{background:var(--surface);}
+td.name{font-weight:600;}
+.badge-est{
+  display:inline-block;margin-left:6px;font-size:9px;font-weight:600;
+  border:1px solid var(--line-strong);border-radius:4px;padding:0 4px;color:var(--muted);
+}
+tbody tr{cursor:pointer;}
+tbody tr:active td{background:var(--surface-2);}
+
+details.splits{border-top:1px solid var(--line);}
+details.splits summary{
+  padding:14px 16px;font-size:13px;font-weight:600;cursor:pointer;
+  list-style:none;display:flex;justify-content:space-between;align-items:center;
+  background:var(--surface);
+}
+details.splits summary::-webkit-details-marker{display:none;}
+details.splits summary::after{content:"›";transform:rotate(90deg);color:var(--muted);font-size:18px;}
+details.splits[open] summary::after{transform:rotate(-90deg);}
+
+.foot{padding:18px 16px 28px;font-size:11px;line-height:1.5;color:var(--muted);border-top:1px solid var(--line);}
+
+/* ---------- fiche POI (superposition) ---------- */
+.overlay{
+  /* au-dessus des contrôles Leaflet, qui montent à z-index 1000 */
+  position:absolute;inset:0;z-index:1200;
+  background:color-mix(in srgb,var(--ink) 34%,transparent);
+  display:none;align-items:flex-end;
+}
+.overlay.is-open{display:flex;}
+.card{
+  width:100%;background:var(--surface);
+  border-radius:18px 18px 0 0;
+  max-height:82%;display:flex;flex-direction:column;
+  box-shadow:var(--shadow-sheet);
+  animation:rise .22s cubic-bezier(.22,.61,.36,1);
+}
+@keyframes rise{from{transform:translateY(14px);opacity:.6;}to{transform:none;opacity:1;}}
+@media (prefers-reduced-motion:reduce){.card{animation:none;}}
+.card-scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.card-hero{padding:12px 18px 14px;border-bottom:1px solid var(--line);}
+.card-kick{
+  display:flex;align-items:center;gap:8px;
+  font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;
+}
+.card-kick .ic{width:22px;height:22px;border-radius:7px;font-size:11px;}
+.card-hero h3{margin:8px 0 0;font-size:22px;font-weight:700;letter-spacing:-.025em;line-height:1.12;}
+.card-hero .adr{margin:3px 0 0;font-size:12.5px;color:var(--muted);}
+.card-grid{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line);}
+.card-cell{padding:11px 8px 12px 16px;border-right:1px solid var(--line);}
+.card-cell:last-child{border-right:none;}
+.card-cell .lbl{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);display:block;}
+.card-cell b{
+  display:block;font-size:19px;font-weight:700;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;margin-top:2px;
+}
+.card-note{
+  margin:12px 16px;padding:9px 11px;border-radius:9px;font-size:12px;line-height:1.45;
+  background:color-mix(in srgb,var(--muted) 12%,transparent);color:var(--muted);
+}
+.card-cta{display:flex;gap:8px;padding:12px 16px calc(env(safe-area-inset-bottom) + 16px);}
+.card-cta button{
+  flex:1;border:1px solid var(--line);background:var(--surface);
+  border-radius:10px;padding:12px;font-size:13.5px;font-weight:600;cursor:pointer;
+}
+.card-cta button.solid{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+
+/* ---------- marqueurs Leaflet ---------- */
+.geoloc-dot{
+  width:16px;height:16px;border-radius:50%;
+  background:#2f7dd1;border:3px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.25);
+}
+.cursor-dot{
+  width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:3px solid var(--surface);
+  box-shadow:0 0 0 1px var(--accent);
+}
