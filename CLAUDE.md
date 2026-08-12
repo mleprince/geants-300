@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repo contains a single self-contained pace-planning tool for "Les Géants 300", an ultra-distance cycling event. There is no build system, package manager, or test suite — the entire app is one static HTML file.
 
-- `geants-300-app.html` — the app: inline `<style>`, embedded fonts (base64 `data:font/ttf` URIs), an embedded `ROUTE` track (array of `{km, lat, lon, ele}` points, currently sampled every 0.1 km) inside a `<script>` tag, and the application logic in a second `<script>` (an IIFE).
+- `index.html` — the app: inline `<style>`, embedded fonts (base64 `data:font/ttf` URIs), an embedded `ROUTE` track (array of `{km, lat, lon, ele}` points, currently sampled every 0.1 km) inside a `<script>` tag, and the application logic in a second `<script>` (an IIFE).
 - `geants-2026.gpx` — the raw GPX source (COROS export) that the `ROUTE.track` data in the HTML was derived from. There is no script in this repo that performs the GPX → `ROUTE` conversion; if regenerating the embedded track, resample the GPX trkpts to a `{km, lat, lon, ele}` array (~0.1 km spacing) and paste it into the `ROUTE.track` literal in the HTML.
 
 ## Working with the HTML file
