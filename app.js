@@ -76,17 +76,21 @@
     water: {label:"Eau",       color:"var(--t-water)", icon:"💧", on:true},
     bread: {label:"Pain",      color:"var(--t-bread)", icon:"🥖", on:true},
     shop:  {label:"Épicerie",  color:"var(--t-shop)",  icon:"🛒", on:true},
+    food:  {label:"Kebab / Pizza", color:"var(--t-food)", icon:"🍕", on:true},
     cem:   {label:"Cimetière", color:"var(--t-cem)",   icon:"✚",  on:false}
   };
   const TYPE_GROUP = {
     drinking_water:"water", fountain:"water",
     bakery:"bread",
     convenience:"shop", supermarket:"shop",
+    pizza:"food", kebab:"food", fast_food:"food",
     cemetery:"cem"
   };
   const TYPE_LABEL = {
     drinking_water:"Point d'eau", fountain:"Fontaine", bakery:"Boulangerie",
-    convenience:"Épicerie", supermarket:"Supermarché", cemetery:"Cimetière", col:"Col"
+    convenience:"Épicerie", supermarket:"Supermarché",
+    pizza:"Pizzeria", kebab:"Kebab", fast_food:"Restauration rapide",
+    cemetery:"Cimetière", col:"Col"
   };
 
   const points = [];
@@ -115,22 +119,13 @@
   /* ======================================================================
      3. État
      ====================================================================== */
-  let pauses = [];
   let cursorKm = 0;
   let activeView = "carte";
-  let plotScope = "all";
+  // fenêtre visible du grand profil (zoom) ; initialisée sur tout le parcours
+  let viewFrom = 0, viewTo = totalKm;
+  const MIN_SPAN_KM = 1.5;   // zoom maxi : on ne descend pas sous 1,5 km affiché
   let sheetFull = false;
   const filters = new Set(Object.keys(GROUPS).filter(k=>GROUPS[k].on));
-
-  function pauseKey(p){ return p.key || ("km:"+p.km.toFixed(2)); }
-  function pauseSecBeforeKm(km){
-    let s=0;
-    for (const p of pauses) if (p.km <= km) s += p.min*60;
-    return s;
-  }
-  function totalPauseSec(){ return pauses.reduce((a,p)=>a+p.min*60, 0); }
-  function etaAtKm(km){ return movingSecAtKm(km) + pauseSecBeforeKm(km); }
-  function finishSec(){ return totalMovingSec + totalPauseSec(); }
 
   function visiblePoints(){
     return points.filter(p => p.kind === "col" || filters.has(p.group));
@@ -144,9 +139,6 @@
       }
     }
     return out;
-  }
-  function nextCol(){
-    return points.find(p => p.kind === "col" && p.km > cursorKm + 0.2) || null;
   }
 
   /* ======================================================================
@@ -207,7 +199,7 @@
   /**
    * Dessine un profil dans `container` et mémorise sa géométrie sur
    * container._plot pour que le curseur puisse bouger sans tout redessiner.
-   * opts : {kmFrom, kmTo, topPct, pts, colLabels, poiMarks, pauseMarks}
+   * opts : {kmFrom, kmTo, topPct, pts, colLabels, poiMarks}
    */
   function buildPlot(container, opts){
     const kmFrom = opts.kmFrom, kmTo = opts.kmTo;
@@ -256,13 +248,6 @@
     for (const p of points){
       if (p.kind !== "col" || p.km < kmFrom || p.km > kmTo) continue;
       html += '<span class="mk-col" style="left:'+xOf(p.km).toFixed(2)+'%"></span>';
-    }
-    // pauses
-    if (opts.pauseMarks){
-      for (const p of pauses){
-        if (p.km < kmFrom || p.km > kmTo) continue;
-        html += '<span class="mk-pause" style="left:'+xOf(p.km).toFixed(2)+'%"></span>';
-      }
     }
     // ravitos
     if (opts.poiMarks){
@@ -319,8 +304,7 @@
   function renderStrip(){
     buildPlot(stripPlot, {
       kmFrom:0, kmTo:totalKm, topPct:6, pts:300,
-      poiMarks: pointsAhead(14).filter(p=>p.kind==="poi"),
-      pauseMarks:true
+      poiMarks: pointsAhead(14).filter(p=>p.kind==="poi")
     });
     const restKm = Math.max(0, totalKm - cursorKm);
     const restDplus = Math.max(0, totalDplus - dplusAtKm(cursorKm));
@@ -336,25 +320,69 @@
      ====================================================================== */
   const pvPlot = document.getElementById("pv-plot");
 
-  function scopeRange(){
-    if (plotScope === "ahead") return {from: cursorKm, to: totalKm};
-    if (plotScope === "col"){
-      const c = nextCol();
-      if (c) return {from: Math.max(0, cursorKm - 2), to: Math.min(totalKm, c.km + 8)};
-    }
-    return {from: 0, to: totalKm};
+  /**
+   * Cale la fenêtre de zoom : span borné à [MIN_SPAN_KM, totalKm], puis
+   * translaté pour rester dans [0, totalKm]. Ne redessine pas.
+   */
+  function clampWindow(from, to){
+    let span = Math.min(totalKm, Math.max(MIN_SPAN_KM, to - from));
+    let f = from;
+    if (f + span > totalKm) f = totalKm - span;
+    if (f < 0) f = 0;
+    return {from: f, to: f + span};
+  }
+
+  function setPlotWindow(from, to){
+    const w = clampWindow(from, to);
+    if (w.from === viewFrom && w.to === viewTo) return;
+    viewFrom = w.from; viewTo = w.to;
+    if (activeView === "profil") renderBigPlot();
+  }
+
+  /** Zoom d'un facteur `f` (>1 = on rentre) en gardant `anchorKm` sous le doigt. */
+  function zoomBy(f, anchorKm){
+    const span = viewTo - viewFrom;
+    const a = anchorKm == null ? (viewFrom + viewTo)/2
+                              : Math.max(viewFrom, Math.min(viewTo, anchorKm));
+    const ratio = (a - viewFrom) / Math.max(1e-6, span);
+    const newSpan = Math.min(totalKm, Math.max(MIN_SPAN_KM, span / f));
+    setPlotWindow(a - ratio*newSpan, a - ratio*newSpan + newSpan);
+  }
+
+  function panBy(dKm){ setPlotWindow(viewFrom + dKm, viewTo + dKm); }
+
+  /**
+   * Recentre la fenêtre zoomée sur le repère (suivi GPS, clic carte) — mais
+   * seulement si on le suivait déjà : si l'utilisateur a zoomé ailleurs pour
+   * étudier un col, un point GPS ne doit pas lui reprendre la vue.
+   */
+  function ensureCursorVisible(prevKm){
+    const span = viewTo - viewFrom;
+    if (span >= totalKm) return;
+    if (prevKm != null && (prevKm < viewFrom || prevKm > viewTo)) return;
+    const pad = span * 0.12;
+    if (cursorKm < viewFrom + pad)      setPlotWindow(cursorKm - pad, cursorKm - pad + span);
+    else if (cursorKm > viewTo - pad)   setPlotWindow(cursorKm + pad - span, cursorKm + pad);
   }
 
   function renderBigPlot(){
-    const r = scopeRange();
-    if (r.to - r.from < 1) r.to = Math.min(totalKm, r.from + 1);
+    const from = viewFrom, to = viewTo;
     buildPlot(pvPlot, {
-      kmFrom:r.from, kmTo:r.to, topPct:14, pts:600,
-      colLabels:true, pauseMarks:true,
-      poiMarks: visiblePoints().filter(p=>p.kind==="poi" && p.km>=r.from && p.km<=r.to)
+      kmFrom:from, kmTo:to, topPct:14, pts:600,
+      colLabels:true,
+      poiMarks: visiblePoints().filter(p=>p.kind==="poi" && p.km>=from && p.km<=to)
     });
-    document.getElementById("pv-meta").textContent =
-      fmtKm(totalKm) + " km · " + fmtInt(totalDplus) + " m D+";
+    const zoomed = (to - from) < totalKm - 0.01;
+    document.getElementById("pv-meta").textContent = zoomed
+      ? "km " + fmtKm(from) + " – " + fmtKm(to)
+      : fmtKm(totalKm) + " km · " + fmtInt(totalDplus) + " m D+";
+    document.getElementById("pv-range").textContent = zoomed
+      ? fmtKm(to - from) + " km · +" + fmtInt(Math.max(0, dplusAtKm(to) - dplusAtKm(from))) + " m"
+      : "parcours entier";
+    const zin = document.querySelector('#pv-zoom button[data-zoom="in"]');
+    const zout = document.querySelector('#pv-zoom button[data-zoom="out"]');
+    if (zin)  zin.disabled  = (to - from) <= MIN_SPAN_KM + 1e-6;
+    if (zout) zout.disabled = !zoomed;
   }
 
   function renderCursorList(){
@@ -366,7 +394,7 @@
 
     title.textContent = "Km " + fmtKm(cursorKm) + " · " + fmtInt(track[idx].ele) + " m";
     hint.textContent = "pente " + g.toFixed(1).replace(".",",") + " % · " +
-                       fmtClock(etaAtKm(cursorKm));
+                       fmtClock(movingSecAtKm(cursorKm));
 
     const near = visiblePoints()
       .filter(p => p.km >= cursorKm - 0.05)
@@ -395,7 +423,7 @@
 availableIcon(p) +
       '<span><span class="nm">'+esc(p.name)+'</span>' +
       '<span class="sub"><span>'+esc(sub)+'</span>'+hoursBadge(p)+'</span></span>' +
-      '<span class="dist"><b>'+(dist < 0 ? "0" : fmtKm(dist))+'</b><i>'+fmtClock(etaAtKm(p.km))+'</i></span>' +
+      '<span class="dist"><b>'+(dist < 0 ? "0" : fmtKm(dist))+'</b><i>'+fmtClock(movingSecAtKm(p.km))+'</i></span>' +
       '</button>';
   }
   function availableIcon(p){
@@ -475,7 +503,7 @@ availableIcon(p) +
       ? fmtInt(p.ele) + " m d'altitude" + (p.estimated ? " · position estimée" : "")
       : "Altitude " + fmtInt(p.ele) + " m";
     document.getElementById("poi-card-dist").textContent = fmtKm(dist) + " km";
-    document.getElementById("poi-card-eta").textContent = fmtClock(etaAtKm(p.km));
+    document.getElementById("poi-card-eta").textContent = fmtClock(movingSecAtKm(p.km));
     document.getElementById("poi-card-dplus").textContent = "+" + fmtInt(dplus) + " m";
     document.getElementById("poi-card-note").textContent = p.group === "water"
       ? "Point d'eau relevé dans OpenStreetMap, accessible en permanence. À vérifier sur place : certaines fontaines sont coupées hors saison."
@@ -490,137 +518,9 @@ availableIcon(p) +
   document.getElementById("poi-card-close").addEventListener("click", closePoiCard);
   overlay.addEventListener("click", e=>{ if (e.target === overlay) closePoiCard(); });
   document.addEventListener("keydown", e=>{ if (e.key === "Escape") closePoiCard(); });
-  document.getElementById("poi-card-pause").addEventListener("click", ()=>{
-    if (!cardPoint) return;
-    addPause({km:cardPoint.km, min:15, label:cardPoint.name});
-    closePoiCard();
-    setView("pauses");
-  });
 
   /* ======================================================================
-     9. Pauses
-     ====================================================================== */
-  function buildSuggestions(){
-    const sugg = [];
-    const MAJOR_ELE = 1400;
-    ROUTE.cols.forEach(c=>{
-      const major = c.ele >= MAJOR_ELE;
-      sugg.push({
-        key:"col:"+c.name, km:c.km, min: major ? 18 : 8,
-        label: shortColName(c.name)
-      });
-    });
-    const markers = [0].concat(ROUTE.cols.map(c=>c.km)).concat([totalKm]).sort((a,b)=>a-b);
-    for (let i=0;i<markers.length-1;i++){
-      const gap = markers[i+1]-markers[i];
-      if (gap > 45){
-        const mid = markers[i] + gap/2;
-        // On accroche la pause à un vrai ravitaillement : commerces d'abord,
-        // eau à défaut. Sans ce filtre, un cimetière peut « gagner ».
-        let best = null, bestD = 6;
-        for (const rank of [["bread","shop"], ["water"]]){
-          points.forEach(p=>{
-            if (p.kind !== "poi" || !rank.includes(p.group)) return;
-            const d = Math.abs(p.km - mid);
-            if (d < bestD){ bestD = d; best = p; }
-          });
-          if (best) break;
-        }
-        sugg.push({
-          key:"gap:"+i, km: best ? best.km : mid, min:20,
-          label: best ? best.name : "Long tronçon"
-        });
-      }
-    }
-    const duskMin = 21*60+30;
-    for (let k=0;k<N;k++){
-      if ((startMinOfDay + cumTimeArr[k]/60) % 1440 >= duskMin){
-        const km = track[k].km;
-        if (!sugg.some(s=>Math.abs(s.km-km)<8) && km < totalKm-5){
-          sugg.push({key:"dusk", km, min:20, label:"Tombée de la nuit"});
-        }
-        break;
-      }
-    }
-    sugg.sort((a,b)=>a.km-b.km);
-    return sugg;
-  }
-  const suggestions = buildSuggestions();
-
-  function addPause(p){
-    if (!pauses.some(x=>pauseKey(x) === pauseKey(p))) pauses.push(p);
-    recompute();
-  }
-
-  function renderSuggestions(){
-    const wrap = document.getElementById("suggest-list");
-    wrap.innerHTML = suggestions.map(s=>{
-      const on = pauses.some(p=>p.key === s.key);
-      return '<button type="button" data-key="'+esc(s.key)+'" aria-pressed="'+on+'">' +
-             esc(s.label) + ' · km ' + Math.round(s.km) + '</button>';
-    }).join("");
-    wrap.querySelectorAll("button").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const s = suggestions.find(x=>x.key === btn.dataset.key);
-        const i = pauses.findIndex(p=>p.key === s.key);
-        if (i >= 0) pauses.splice(i,1);
-        else pauses.push({km:s.km, min:s.min, label:s.label, key:s.key});
-        recompute();
-      });
-    });
-  }
-
-  function renderPauses(){
-    const list = document.getElementById("pause-list");
-    if (!pauses.length){
-      list.innerHTML = '<p class="empty">Aucune pause planifiée.</p>';
-      return;
-    }
-    const sorted = pauses.slice().sort((a,b)=>a.km-b.km);
-    list.innerHTML = sorted.map((p,i)=>
-      '<div class="prow" data-i="'+i+'">' +
-        '<span><span class="nm">'+esc(p.label || "Pause")+'</span>' +
-        '<span class="sub">km '+fmtKm(p.km)+' · reprise '+fmtClock(etaAtKm(p.km))+'</span></span>' +
-        '<span class="step">' +
-          '<button type="button" data-act="minus" aria-label="Retirer 5 minutes">−</button>' +
-          '<b>'+p.min+'′</b>' +
-          '<button type="button" data-act="plus" aria-label="Ajouter 5 minutes">+</button>' +
-        '</span>' +
-        '<button class="rm" type="button" data-act="rm" aria-label="Supprimer la pause">×</button>' +
-      '</div>'
-    ).join("");
-    list.querySelectorAll(".prow").forEach(row=>{
-      const p = sorted[Number(row.dataset.i)];
-      row.querySelectorAll("button").forEach(btn=>{
-        btn.addEventListener("click", ()=>{
-          const act = btn.dataset.act;
-          if (act === "rm") pauses = pauses.filter(x=>x !== p);
-          else if (act === "plus") p.min = Math.min(600, p.min + 5);
-          else p.min = Math.max(5, p.min - 5);
-          recompute();
-        });
-      });
-    });
-  }
-
-  document.getElementById("add-pause").addEventListener("click", ()=>{
-    const kmI = document.getElementById("pause-km");
-    const minI = document.getElementById("pause-min");
-    const lblI = document.getElementById("pause-label");
-    const km = parseFloat(kmI.value);
-    const min = parseInt(minI.value, 10);
-    const kmBad = isNaN(km) || km < 0 || km > totalKm;
-    const minBad = isNaN(min) || min <= 0;
-    kmI.classList.toggle("invalid", kmBad);
-    minI.classList.toggle("invalid", minBad);
-    if (kmBad || minBad) return;
-    pauses.push({km, min, label: lblI.value.trim() || "Pause"});
-    kmI.value = ""; minI.value = ""; lblI.value = "";
-    recompute();
-  });
-
-  /* ======================================================================
-     10. Tableaux (vue Plan)
+     9. Tableaux (vue Plan)
      ====================================================================== */
   function renderWaypoints(){
     const body = document.getElementById("waypoints-body");
@@ -628,21 +528,14 @@ availableIcon(p) +
       .concat(ROUTE.cols.map(c=>({name:c.name, km:c.km, ele:c.ele, estimated:c.estimated})))
       .concat([{name:"Arrivée", km:totalKm, ele:track[N-1].ele}]);
     body.innerHTML = rows.map(p=>{
-      const moving = movingSecAtKm(p.km), ps = pauseSecBeforeKm(p.km);
+      const moving = movingSecAtKm(p.km);
       return '<tr data-km="'+p.km+'">' +
         '<td class="name">'+esc(p.name)+(p.estimated?'<span class="badge-est">estimé</span>':'')+'</td>' +
         '<td>'+fmtKm(p.km)+'</td><td>'+fmtInt(p.ele)+' m</td>' +
         '<td>+'+fmtInt(dplusAtKm(p.km))+' m</td>' +
-        '<td>'+fmtHM(moving)+'</td><td>'+(ps>0?fmtHM(ps):"—")+'</td>' +
-        '<td>'+fmtClock(moving+ps)+'</td></tr>';
+        '<td>'+fmtHM(moving)+'</td>' +
+        '<td>'+fmtClock(moving)+'</td></tr>';
     }).join("");
-    body.querySelectorAll("tr").forEach(tr=>{
-      tr.addEventListener("click", ()=>{
-        document.getElementById("pause-km").value = Number(tr.dataset.km).toFixed(1);
-        setView("pauses");
-        document.getElementById("pause-min").focus();
-      });
-    });
     document.getElementById("plan-meta").textContent =
       fmtKm(totalKm) + " km · " + fmtInt(totalDplus) + " m D+";
   }
@@ -661,7 +554,7 @@ availableIcon(p) +
         '<td>+'+fmtInt(segDplus)+' m</td><td>−'+fmtInt(segDminus)+' m</td>' +
         '<td>+'+fmtInt(dplus)+' m</td>' +
         '<td>'+(avgGrad>=0?"+":"")+avgGrad.toFixed(1).replace(".",",")+' %</td>' +
-        '<td>'+fmtHM(moving)+'</td><td>'+fmtClock(moving+pauseSecBeforeKm(kkm))+'</td></tr>';
+        '<td>'+fmtHM(moving)+'</td><td>'+fmtClock(moving)+'</td></tr>';
       prevDplus = dplus; prevDminus = dminus;
       if (kkm >= totalKm) break;
     }
@@ -669,7 +562,7 @@ availableIcon(p) +
   }
 
   /* ======================================================================
-     11. Carte Leaflet
+     10. Carte Leaflet
      ====================================================================== */
   let map = null, cursorMarker = null;
   const groupLayers = {};
@@ -710,7 +603,7 @@ availableIcon(p) +
     for (let i=0; i<N; i+=STEP) latlngs.push([track[i].lat, track[i].lon]);
     latlngs.push([track[N-1].lat, track[N-1].lon]);
     L.polyline(latlngs, {
-      color: resolve("var(--accent)"), weight:4, opacity:.95,
+      color: "#e02020", weight:4, opacity:.95,
       lineCap:"round", lineJoin:"round"
     }).addTo(map);
 
@@ -723,8 +616,8 @@ availableIcon(p) +
       const isCol = p.kind === "col";
       const marker = L.circleMarker([p.lat, p.lon], {
         radius: radiusForZoom(isCol),
-        color: isCol ? "#ffffff" : resolve("var(--surface)"),
-        weight: 2,
+        color: "#2b3440",
+        weight: 1,
         fillColor: resolve(p.color),
         fillOpacity: 1
       });
@@ -741,8 +634,8 @@ availableIcon(p) +
     resizeMarkers();
 
     L.circleMarker([track[0].lat, track[0].lon], {
-      radius:6, color:"#fff", weight:2,
-      fillColor:resolve("var(--ink)"), fillOpacity:1
+      radius:6, color:"#2b3440", weight:1.5,
+      fillColor:"#e02020", fillOpacity:1
     }).bindTooltip("Départ / Arrivée").addTo(map);
 
     applyMapFilters();
@@ -808,7 +701,7 @@ availableIcon(p) +
   }
 
   /* ======================================================================
-     12. Géolocalisation
+     11. Géolocalisation
      ====================================================================== */
   let geoWatchId = null, geoMarker = null, geoCircle = null;
 
@@ -835,7 +728,7 @@ availableIcon(p) +
   function stopGeolocation(){
     if (geoWatchId != null){ navigator.geolocation.clearWatch(geoWatchId); geoWatchId = null; }
     const btn = document.getElementById("geoloc-toggle");
-    btn.classList.remove("active");
+    btn.setAttribute("aria-pressed", "false");
     btn.title = "Afficher ma position";
     if (geoMarker) { map.removeLayer(geoMarker); geoMarker = null; }
     if (geoCircle) { map.removeLayer(geoCircle); geoCircle = null; }
@@ -848,7 +741,7 @@ availableIcon(p) +
       return;
     }
     const btn = document.getElementById("geoloc-toggle");
-    btn.classList.add("active");
+    btn.setAttribute("aria-pressed", "true");
     btn.title = "Suivi en cours — appuyer pour arrêter";
     geoWatchId = navigator.geolocation.watchPosition(
       onGeoPosition,
@@ -858,7 +751,7 @@ availableIcon(p) +
   });
 
   /* ======================================================================
-     13. Curseur partagé
+     12. Curseur partagé
      ====================================================================== */
   /* Pendant un balayage au doigt, la partie « légère » (repères, entête,
      marqueur sur la carte) suit chaque frame ; la reconstruction des listes de
@@ -880,7 +773,10 @@ availableIcon(p) +
   }
 
   function setCursorKm(km, opts){
+    const prevKm = cursorKm;
     cursorKm = Math.max(0, Math.min(totalKm, km));
+    // hors balayage (GPS, clic carte), le profil zoomé se recale sur le repère
+    if (!(opts && opts.live)) ensureCursorVisible(prevKm);
     positionCursor(stripPlot);
     positionCursor(pvPlot);
     updateMapCursor(opts && opts.live);
@@ -897,7 +793,7 @@ availableIcon(p) +
   function renderMapMeta(){
     document.getElementById("map-meta").textContent =
       (cursorKm > 0.2 ? "km " + fmtKm(cursorKm) + " · " : "") +
-      "arrivée " + fmtClock(finishSec());
+      "arrivée " + fmtClock(totalMovingSec);
   }
 
   /**
@@ -910,21 +806,56 @@ availableIcon(p) +
     const state = {moved:false};
     let active = false, startX = 0, startY = 0;
 
-    function kmFromEvent(e){
-      const g = el._plot;
-      if (!g) return null;
+    function fracFromEvent(e){
       const r = el.getBoundingClientRect();
       if (!r.width) return null;
-      const f = Math.max(0, Math.min(1, (e.clientX - r.left)/r.width));
-      return g.kmFrom + f*(g.kmTo - g.kmFrom);
+      return Math.max(0, Math.min(1, (e.clientX - r.left)/r.width));
+    }
+    function kmFromEvent(e){
+      const g = el._plot;
+      const f = g ? fracFromEvent(e) : null;
+      return f == null ? null : g.kmFrom + f*(g.kmTo - g.kmFrom);
     }
     function scrub(e){
       const km = kmFromEvent(e);
       if (km != null) setCursorKm(km, {live:true});
+      if (el === pvPlot) edgePan(fracFromEvent(e));
+    }
+
+    /* Balayage sur un profil zoomé : maintenir le doigt contre un bord fait
+       défiler la fenêtre, sinon on ne pourrait pas dépasser le cadre. */
+    let edgeDir = 0, edgeRaf = null, edgeLast = 0;
+    const EDGE_SPANS_PER_SEC = 0.4;   // une largeur d'écran toutes les 2,5 s
+    function edgePan(f){
+      const d = f == null ? 0 : (f < 0.05 ? -1 : (f > 0.95 ? 1 : 0));
+      if (d === edgeDir) return;
+      edgeDir = d;
+      if (d === 0) return stopEdgePan();
+      if (edgeRaf == null){
+        edgeLast = performance.now();
+        edgeRaf = requestAnimationFrame(edgeStep);
+      }
+    }
+    function edgeStep(now){
+      edgeRaf = null;
+      if (!active || !edgeDir) return;
+      const dt = Math.min(0.1, (now - edgeLast)/1000);   // borne les gros sauts
+      edgeLast = now;
+      const span = viewTo - viewFrom;
+      if (span < totalKm){
+        panBy(edgeDir * span * EDGE_SPANS_PER_SEC * dt);
+        setCursorKm(edgeDir < 0 ? viewFrom : viewTo, {live:true});
+      }
+      edgeRaf = requestAnimationFrame(edgeStep);
+    }
+    function stopEdgePan(){
+      edgeDir = 0;
+      if (edgeRaf != null){ cancelAnimationFrame(edgeRaf); edgeRaf = null; }
     }
 
     el.addEventListener("pointerdown", e=>{
       if (e.button != null && e.button !== 0) return;
+      if (pinchActive()) return;
       active = true;
       state.moved = false;
       startX = e.clientX; startY = e.clientY;
@@ -936,6 +867,7 @@ availableIcon(p) +
     });
     el.addEventListener("pointermove", e=>{
       if (!active) return;
+      if (pinchActive()){ stopEdgePan(); active = false; return; }
       if (!state.moved){
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < threshold) return;
         state.moved = true;
@@ -944,32 +876,85 @@ availableIcon(p) +
       scrub(e);
     });
     function end(){
+      stopEdgePan();
       if (active && state.moved) setCursorKm(cursorKm); // rendu complet des listes
       active = false;
     }
     el.addEventListener("pointerup", end);
-    el.addEventListener("pointercancel", ()=>{ active = false; });
+    el.addEventListener("pointercancel", ()=>{ stopEdgePan(); active = false; });
     return state;
   }
+
+  /* ---- pincer pour zoomer / deux doigts pour faire défiler (grand profil) ---- */
+  const pinchPts = new Map();
+  let pinchRef = null;   // {dist, centerKm, span}
+  function pinchActive(){ return pinchPts.size >= 2; }
+
+  function pinchGeom(){
+    const [a, b] = [...pinchPts.values()];
+    const r = pvPlot.getBoundingClientRect();
+    const dist = Math.max(1, Math.abs(a.x - b.x));
+    const f = Math.max(0, Math.min(1, ((a.x + b.x)/2 - r.left)/Math.max(1, r.width)));
+    return {dist, f};
+  }
+
+  pvPlot.addEventListener("pointerdown", e=>{
+    pinchPts.set(e.pointerId, {x:e.clientX});
+    if (pinchActive()){
+      const g = pinchGeom();
+      const span = viewTo - viewFrom;
+      pinchRef = {dist:g.dist, span, centerKm: viewFrom + g.f*span, f:g.f};
+    }
+  });
+  pvPlot.addEventListener("pointermove", e=>{
+    if (!pinchPts.has(e.pointerId)) return;
+    pinchPts.set(e.pointerId, {x:e.clientX});
+    if (!pinchActive() || !pinchRef) return;
+    const g = pinchGeom();
+    const span = Math.min(totalKm, Math.max(MIN_SPAN_KM, pinchRef.span * pinchRef.dist / g.dist));
+    // le centre suit le milieu des doigts : le pincement fait aussi office de pan
+    setPlotWindow(pinchRef.centerKm - g.f*span, pinchRef.centerKm + (1-g.f)*span);
+  });
+  function pinchDrop(e){
+    pinchPts.delete(e.pointerId);
+    if (!pinchActive()) pinchRef = null;
+  }
+  pvPlot.addEventListener("pointerup", pinchDrop);
+  pvPlot.addEventListener("pointercancel", pinchDrop);
+  pvPlot.addEventListener("pointerleave", pinchDrop);
+
+  /* ---- molette : zoom au pointeur, shift/molette horizontale : défilement ---- */
+  pvPlot.addEventListener("wheel", e=>{
+    e.preventDefault();
+    const r = pvPlot.getBoundingClientRect();
+    if (!r.width) return;
+    const f = Math.max(0, Math.min(1, (e.clientX - r.left)/r.width));
+    const span = viewTo - viewFrom;
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)){
+      panBy((e.deltaX || e.deltaY) / r.width * span);
+    } else {
+      zoomBy(Math.exp(-e.deltaY * 0.002), viewFrom + f*span);
+    }
+  }, {passive:false});
 
   wireScrub(pvPlot, 0);                          // grand profil : prise immédiate
   const stripScrub = wireScrub(stripPlot, 6);    // bandeau : appui = ouvrir, glissé = balayer
 
   /* ======================================================================
-     14. Onglets
+     13. Onglets
      ====================================================================== */
   function setView(name){
     activeView = name;
     document.querySelectorAll(".view").forEach(v=>{
       v.classList.toggle("is-active", v.id === "view-"+name);
     });
-    document.querySelectorAll(".tabbar button").forEach(b=>{
+    document.querySelectorAll(".tabbar .tabs button").forEach(b=>{
       b.setAttribute("aria-selected", b.dataset.view === name);
     });
     if (name === "carte") requestAnimationFrame(fitRoute);
     if (name === "profil") renderBigPlot();
   }
-  document.querySelectorAll(".tabbar button").forEach(b=>{
+  document.querySelectorAll(".tabbar .tabs button").forEach(b=>{
     b.addEventListener("click", ()=>setView(b.dataset.view));
   });
   document.getElementById("strip").addEventListener("click", ()=>{
@@ -978,27 +963,38 @@ availableIcon(p) +
   });
   document.getElementById("fab-profil").addEventListener("click", ()=>setView("profil"));
 
-  document.getElementById("pv-scope").querySelectorAll("button").forEach(b=>{
+  document.getElementById("pv-zoom").querySelectorAll("button").forEach(b=>{
     b.addEventListener("click", ()=>{
-      plotScope = b.dataset.scope;
-      document.querySelectorAll("#pv-scope button").forEach(x=>{
-        x.setAttribute("aria-pressed", x.dataset.scope === plotScope);
-      });
-      renderBigPlot();
+      const span = viewTo - viewFrom;
+      switch (b.dataset.zoom){
+        case "in":  zoomBy(1.6, cursorInWindow() ? cursorKm : null); break;
+        case "out": zoomBy(1/1.6, cursorInWindow() ? cursorKm : null); break;
+        case "fit": setPlotWindow(0, totalKm); break;
+        case "here": {
+          const s = Math.min(totalKm, span >= totalKm ? 20 : span);
+          setPlotWindow(cursorKm - s/2, cursorKm + s/2);
+          break;
+        }
+      }
     });
   });
+  function cursorInWindow(){ return cursorKm >= viewFrom && cursorKm <= viewTo; }
 
   /* ======================================================================
-     15. Feuille glissante
+     14. Feuille glissante
      ====================================================================== */
   (function wireSheet(){
     const sheet = document.getElementById("sheet");
     const grab = document.getElementById("sheet-grab");
     const view = document.getElementById("view-carte");
     const topbar = view.querySelector(".topbar");
-    const peek = parseInt(getComputedStyle(document.documentElement)
-      .getPropertyValue("--sheet-peek"), 10) || 246;
+    const cssPx = (name, fallback) => parseInt(getComputedStyle(document.documentElement)
+      .getPropertyValue(name), 10) || fallback;
+    const peek = cssPx("--sheet-peek", 246);
+    const collapsed = cssPx("--sheet-collapsed", 26);
     let startY = 0, startH = 0, moved = 0, dragging = false;
+    // Trois positions : escamotée (carte entière), entrouverte, dépliée.
+    let sheetState = "peek";
 
     // Dépliée, la feuille occupe toute la hauteur sous la barre de titre
     // (sa marge négative est annulée en CSS dans cet état).
@@ -1006,12 +1002,24 @@ availableIcon(p) +
       return view.getBoundingClientRect().height -
              topbar.getBoundingClientRect().height;
     }
+    function heightFor(state){
+      return state === "full" ? fullHeight()
+           : state === "collapsed" ? collapsed
+           : peek;
+    }
 
-    function setFull(on){
-      sheetFull = on;
-      sheet.classList.toggle("is-full", on);
-      sheet.style.height = on ? fullHeight() + "px" : "";
-      grab.setAttribute("aria-expanded", String(on));
+    function setState(state){
+      sheetState = state;
+      sheetFull = state === "full";
+      sheet.classList.toggle("is-full", state === "full");
+      sheet.classList.toggle("is-collapsed", state === "collapsed");
+      // La hauteur des états fixes vient du CSS ; seule « full » se mesure.
+      sheet.style.height = state === "full" ? fullHeight() + "px" : "";
+      grab.setAttribute("aria-expanded", String(state !== "collapsed"));
+      grab.setAttribute("aria-label",
+        state === "collapsed" ? "Déplier la liste des ravitaillements"
+        : state === "peek"    ? "Agrandir la liste des ravitaillements"
+        :                       "Escamoter la feuille pour voir la carte");
       if (activeView === "carte") requestAnimationFrame(fitRoute);
     }
     window.addEventListener("resize", ()=>{ if (sheetFull) sheet.style.height = fullHeight() + "px"; });
@@ -1027,32 +1035,42 @@ availableIcon(p) +
       if (!dragging) return;
       const dy = startY - e.clientY;
       moved = Math.max(moved, Math.abs(dy));
-      sheet.style.height = Math.max(peek*0.6, Math.min(fullHeight(), startH + dy)) + "px";
+      // Pendant le glissé, on laisse descendre jusqu'à la position escamotée.
+      sheet.style.height = Math.max(collapsed, Math.min(fullHeight(), startH + dy)) + "px";
+      // Le clip de la feuille escamotée doit suivre le doigt, pas seulement
+      // l'état final, sinon le bandeau profil dépasse en cours de glissé.
+      sheet.classList.toggle("is-full", startH + dy >= fullHeight() - 1);
     });
     function end(){
       if (!dragging) return;
       dragging = false;
       sheet.classList.remove("is-dragging");
-      if (moved < 6){ setFull(!sheetFull); return; }
+      if (moved < 6){
+        // Appui simple : on cycle escamotée → entrouverte → dépliée → …
+        setState(sheetState === "collapsed" ? "peek"
+               : sheetState === "peek"      ? "full"
+               :                              "collapsed");
+        return;
+      }
+      // Glissé : on se cale sur la position la plus proche des trois.
       const h = sheet.getBoundingClientRect().height;
-      setFull(h > (peek + fullHeight())/2);
+      const nearest = ["collapsed", "peek", "full"]
+        .reduce((best, s) =>
+          Math.abs(heightFor(s) - h) < Math.abs(heightFor(best) - h) ? s : best);
+      setState(nearest);
     }
     grab.addEventListener("pointerup", end);
     grab.addEventListener("pointercancel", end);
+    setState("peek");
   })();
 
   /* ======================================================================
-     16. Recalcul global
+     15. Recalcul global
      ====================================================================== */
   function recompute(){
-    document.getElementById("band-finish").textContent = fmtClock(finishSec());
-    document.getElementById("band-pause").textContent =
-      totalPauseSec() > 0 ? fmtHM(totalPauseSec()) : "—";
     renderMapMeta();
     renderStrip();
     renderPoiList();
-    renderSuggestions();
-    renderPauses();
     renderWaypoints();
     renderSplits();
     if (activeView === "profil") renderBigPlot();

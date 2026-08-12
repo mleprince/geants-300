@@ -4,6 +4,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3D7A4B">
 <title>Les Géants 300</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Géants 300">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <link rel="stylesheet" href="style.css">
 
@@ -19,10 +25,12 @@
       <div class="pv-plot" id="pv-plot">
         <svg id="profile-svg" preserveAspectRatio="none" aria-label="Profil altimétrique du parcours"></svg>
       </div>
-      <div class="pv-scope" id="pv-scope" role="group" aria-label="Étendue affichée">
-        <button type="button" data-scope="all" aria-pressed="true">Tout</button>
-        <button type="button" data-scope="ahead" aria-pressed="false">Devant moi</button>
-        <button type="button" data-scope="col" aria-pressed="false">Prochain col</button>
+      <div class="pv-scope" id="pv-zoom" role="group" aria-label="Zoom du profil">
+        <button type="button" data-zoom="out" aria-label="Dézoomer">−</button>
+        <button type="button" data-zoom="in" aria-label="Zoomer">+</button>
+        <button type="button" data-zoom="fit">Tout</button>
+        <button type="button" data-zoom="here">Sur le repère</button>
+        <span class="pv-range" id="pv-range"></span>
       </div>
       <div class="legend">
         <span><i style="background:var(--flat)"></i>Plat &lt;2 % · 25 km/h</span>
@@ -33,7 +41,7 @@
       <div class="view-scroll">
         <div class="sec-head">
           <h2 id="pv-cursor-title">Au repère</h2>
-          <span class="hint" id="pv-cursor-hint">balayez le profil</span>
+          <span class="hint" id="pv-cursor-hint">balayez · pincez pour zoomer</span>
         </div>
         <div id="pv-cursor-list"></div>
       </div>
@@ -48,8 +56,7 @@
       <div class="map-area">
         <div id="leaflet-map"></div>
         <div class="chips" id="poi-filters" role="group" aria-label="Filtrer les points d'intérêt"></div>
-        <button class="fab" id="fab-profil" type="button" style="bottom:62px" title="Ouvrir le profil" aria-label="Ouvrir le profil">⛰</button>
-        <button class="fab" id="geoloc-toggle" type="button" style="bottom:12px" title="Afficher ma position" aria-label="Afficher ma position">📍</button>
+        <button class="fab" id="fab-profil" type="button" style="bottom:12px" title="Ouvrir le profil" aria-label="Ouvrir le profil">⛰</button>
       </div>
       <div class="sheet" id="sheet">
         <button class="sheet-grab" id="sheet-grab" type="button" aria-expanded="false" aria-controls="poi-list" aria-label="Déplier la liste des ravitaillements">
@@ -67,31 +74,6 @@
       </div>
     </section>
 
-    <!-- ================= Pauses ================= -->
-    <section class="view" id="view-pauses" role="tabpanel" aria-labelledby="tab-pauses">
-      <div class="topbar">
-        <h1>Pauses</h1>
-        <span class="meta">chaque arrêt décale la suite</span>
-      </div>
-      <div class="view-scroll">
-        <div class="band">
-          <div><span class="lbl">Arrivée estimée</span><b id="band-finish">—</b></div>
-          <div style="text-align:right"><span class="lbl">Total des arrêts</span><b id="band-pause">—</b></div>
-        </div>
-        <div class="sec-head"><h2>Suggestions</h2><span class="hint">appuyez pour inclure</span></div>
-        <div class="sugg" id="suggest-list"></div>
-        <div class="sec-head"><h2>Pauses retenues</h2></div>
-        <div id="pause-list"></div>
-        <div class="sec-head"><h2>Pause personnalisée</h2></div>
-        <div class="addform">
-          <div class="field"><label for="pause-km">Km</label><input type="number" id="pause-km" inputmode="decimal" min="0" step="0.1" placeholder="70.2"></div>
-          <div class="field"><label for="pause-min">Minutes</label><input type="number" id="pause-min" inputmode="numeric" min="1" max="600" step="1" placeholder="15"></div>
-          <div class="field wide"><label for="pause-label">Motif</label><input type="text" id="pause-label" placeholder="ravito, sieste…"></div>
-          <button class="btn" id="add-pause" type="button">Ajouter la pause</button>
-        </div>
-      </div>
-    </section>
-
     <!-- ================= Plan ================= -->
     <section class="view" id="view-plan" role="tabpanel" aria-labelledby="tab-plan">
       <div class="topbar">
@@ -99,11 +81,11 @@
         <span class="meta" id="plan-meta">—</span>
       </div>
       <div class="view-scroll">
-        <div class="sec-head"><h2>Passages clés</h2><span class="hint">appuyez pour y placer une pause</span></div>
+        <div class="sec-head"><h2>Passages clés</h2></div>
         <div class="tbl-wrap">
           <table id="waypoints-table">
             <thead>
-              <tr><th>Point</th><th>Km</th><th>Alt.</th><th>D+</th><th>Roulé</th><th>Pauses</th><th>Arrivée</th></tr>
+              <tr><th>Point</th><th>Km</th><th>Alt.</th><th>D+</th><th>Roulé</th><th>Arrivée</th></tr>
             </thead>
             <tbody id="waypoints-body"></tbody>
           </table>
@@ -125,18 +107,20 @@
 
   </div>
 
-  <nav class="tabbar" role="tablist" aria-label="Sections">
+  <nav class="tabbar" aria-label="Sections">
+    <div class="tabs" role="tablist" aria-label="Sections">
     <button type="button" id="tab-profil" role="tab" data-view="profil" aria-selected="false" aria-controls="view-profil">
       <svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19h20M3 16l6-9 4 5 3-3.5 5 7.5"/></svg>Profil
     </button>
     <button type="button" id="tab-carte" role="tab" data-view="carte" aria-selected="true" aria-controls="view-carte">
       <svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 7 9 4z"/><path d="M9 4v13M15 7v12.5"/></svg>Carte
     </button>
-    <button type="button" id="tab-pauses" role="tab" data-view="pauses" aria-selected="false" aria-controls="view-pauses">
-      <svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pauses
-    </button>
     <button type="button" id="tab-plan" role="tab" data-view="plan" aria-selected="false" aria-controls="view-plan">
       <svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h11M4 20h11"/></svg>Plan
+    </button>
+    </div>
+    <button class="geo-btn" id="geoloc-toggle" type="button" aria-pressed="false" title="Afficher ma position" aria-label="Afficher ma position">
+      <svg class="ti" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="7.6"/><path d="M12 1.6v3M12 19.4v3M1.6 12h3M19.4 12h3"/></svg>
     </button>
   </nav>
 
@@ -157,8 +141,7 @@
         <p class="card-note" id="poi-card-note"></p>
       </div>
       <div class="card-cta">
-        <button type="button" id="poi-card-close">Fermer</button>
-        <button type="button" class="solid" id="poi-card-pause">Pause ici · 15 min</button>
+        <button type="button" class="solid" id="poi-card-close">Fermer</button>
       </div>
     </div>
   </div>
@@ -167,4 +150,12 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="route.js"></script>
 <script src="app.js"></script>
+<script>
+  // PWA : installable + utilisable hors réseau (voir sw.js).
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(){});
+    });
+  }
+</script>
 </html>
