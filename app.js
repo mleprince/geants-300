@@ -702,31 +702,17 @@ availableIcon(p) +
       attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
 
-    // Tracé coloré par pente. La pente est moyennée sur ~500 m : au pas natif
-    // de 100 m elle oscille sans arrêt et produit des centaines de polylignes
-    // d'un seul segment, ce qui fige la carte sur téléphone.
+    // Tracé d'une seule couleur. Le pas est réduit à 500 m (5 × 100 m) : au pas
+    // natif la polyligne compte des milliers de points et fige la carte sur
+    // téléphone.
     const STEP = 5; // 5 × 100 m
-    const nodes = [];
-    for (let i=0; i<N; i+=STEP) nodes.push(track[i]);
-    if (nodes[nodes.length-1] !== track[N-1]) nodes.push(track[N-1]);
-
-    const nodeColor = [];
-    for (let k=1;k<nodes.length;k++){
-      const dM = (nodes[k].km - nodes[k-1].km)*1000;
-      nodeColor.push(resolve(gradColor(dM > 0 ? (nodes[k].ele-nodes[k-1].ele)/dM*100 : 0)));
-    }
-    let i = 0;
-    while (i < nodeColor.length){
-      const color = nodeColor[i];
-      let j = i;
-      const latlngs = [[nodes[j].lat, nodes[j].lon]];
-      while (j < nodeColor.length && nodeColor[j] === color){
-        j++;
-        latlngs.push([nodes[j].lat, nodes[j].lon]);
-      }
-      L.polyline(latlngs, {color, weight:4, opacity:.95, lineCap:"round", lineJoin:"round"}).addTo(map);
-      i = j;
-    }
+    const latlngs = [];
+    for (let i=0; i<N; i+=STEP) latlngs.push([track[i].lat, track[i].lon]);
+    latlngs.push([track[N-1].lat, track[N-1].lon]);
+    L.polyline(latlngs, {
+      color: resolve("var(--accent)"), weight:4, opacity:.95,
+      lineCap:"round", lineJoin:"round"
+    }).addTo(map);
 
     // couches par groupe
     Object.keys(GROUPS).forEach(g=>{ groupLayers[g] = L.layerGroup(); });
@@ -803,16 +789,21 @@ availableIcon(p) +
     return track[bestIdx].km;
   }
 
-  function updateMapCursor(){
+  function updateMapCursor(live){
     if (!map) return;
     const p = track[kmToIndex(cursorKm)];
+    const latlng = [p.lat, p.lon];
     if (!cursorMarker){
-      cursorMarker = L.marker([p.lat, p.lon], {
+      cursorMarker = L.marker(latlng, {
         icon: L.divIcon({className:"cursor-dot", iconSize:[14,14], iconAnchor:[7,7]}),
         interactive:false, zIndexOffset:900
       }).addTo(map);
     } else {
-      cursorMarker.setLatLng([p.lat, p.lon]);
+      cursorMarker.setLatLng(latlng);
+    }
+    // en balayage, on suit le repère s'il sort du cadre (marge de 12 %)
+    if (live && activeView === "carte" && !map.getBounds().pad(-0.12).contains(latlng)){
+      map.panTo(latlng, {animate:false});
     }
   }
 
@@ -869,19 +860,38 @@ availableIcon(p) +
   /* ======================================================================
      13. Curseur partagé
      ====================================================================== */
-  function setCursorKm(km){
+  /* Pendant un balayage au doigt, la partie « légère » (repères, entête,
+     marqueur sur la carte) suit chaque frame ; la reconstruction des listes de
+     POI est limitée dans le temps, sinon le glissé saccade sur mobile. */
+  const HEAVY_MS = 120;
+  let heavyLast = 0, heavyTimer = null;
+
+  function renderCursorLists(){
+    heavyLast = performance.now();
+    if (heavyTimer){ clearTimeout(heavyTimer); heavyTimer = null; }
+    renderPoiList();
+    renderCursorList();
+  }
+
+  function scheduleCursorLists(){
+    const wait = HEAVY_MS - (performance.now() - heavyLast);
+    if (wait <= 0){ renderCursorLists(); return; }
+    if (!heavyTimer) heavyTimer = setTimeout(renderCursorLists, wait);
+  }
+
+  function setCursorKm(km, opts){
     cursorKm = Math.max(0, Math.min(totalKm, km));
     positionCursor(stripPlot);
     positionCursor(pvPlot);
-    updateMapCursor();
-    renderPoiList();
-    renderCursorList();
+    updateMapCursor(opts && opts.live);
     renderMapMeta();
     document.getElementById("strip-ax-c").textContent =
       cursorKm > 0.2 ? "repère · " + Math.round(cursorKm) : "";
     document.getElementById("strip-val").textContent =
       "reste " + fmtKm(Math.max(0, totalKm - cursorKm)) + " km · " +
       Math.round(Math.max(0, totalDplus - dplusAtKm(cursorKm))) + " m D+";
+    if (opts && opts.live) scheduleCursorLists();
+    else renderCursorLists();
   }
 
   function renderMapMeta(){
@@ -890,30 +900,60 @@ availableIcon(p) +
       "arrivée " + fmtClock(finishSec());
   }
 
-  // balayage du grand profil
-  (function wireScrub(){
-    let dragging = false;
+  /**
+   * Rend un profil balayable au doigt / à la souris.
+   * `threshold` : distance (px) à franchir avant de prendre la main — utilisé
+   * sur le bandeau, où un simple appui doit continuer d'ouvrir la vue Profil.
+   * Retourne un objet exposant `moved` (le dernier geste était-il un glissé).
+   */
+  function wireScrub(el, threshold){
+    const state = {moved:false};
+    let active = false, startX = 0, startY = 0;
+
     function kmFromEvent(e){
-      const g = pvPlot._plot;
+      const g = el._plot;
       if (!g) return null;
-      const r = pvPlot.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      if (!r.width) return null;
       const f = Math.max(0, Math.min(1, (e.clientX - r.left)/r.width));
       return g.kmFrom + f*(g.kmTo - g.kmFrom);
     }
-    pvPlot.addEventListener("pointerdown", e=>{
-      dragging = true;
-      pvPlot.setPointerCapture(e.pointerId);
+    function scrub(e){
       const km = kmFromEvent(e);
-      if (km != null) setCursorKm(km);
+      if (km != null) setCursorKm(km, {live:true});
+    }
+
+    el.addEventListener("pointerdown", e=>{
+      if (e.button != null && e.button !== 0) return;
+      active = true;
+      state.moved = false;
+      startX = e.clientX; startY = e.clientY;
+      if (!threshold){
+        el.setPointerCapture(e.pointerId);
+        state.moved = true;
+        scrub(e);
+      }
     });
-    pvPlot.addEventListener("pointermove", e=>{
-      if (!dragging) return;
-      const km = kmFromEvent(e);
-      if (km != null) setCursorKm(km);
+    el.addEventListener("pointermove", e=>{
+      if (!active) return;
+      if (!state.moved){
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) < threshold) return;
+        state.moved = true;
+        el.setPointerCapture(e.pointerId);
+      }
+      scrub(e);
     });
-    pvPlot.addEventListener("pointerup", ()=>{ dragging = false; });
-    pvPlot.addEventListener("pointercancel", ()=>{ dragging = false; });
-  })();
+    function end(){
+      if (active && state.moved) setCursorKm(cursorKm); // rendu complet des listes
+      active = false;
+    }
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", ()=>{ active = false; });
+    return state;
+  }
+
+  wireScrub(pvPlot, 0);                          // grand profil : prise immédiate
+  const stripScrub = wireScrub(stripPlot, 6);    // bandeau : appui = ouvrir, glissé = balayer
 
   /* ======================================================================
      14. Onglets
@@ -932,7 +972,10 @@ availableIcon(p) +
   document.querySelectorAll(".tabbar button").forEach(b=>{
     b.addEventListener("click", ()=>setView(b.dataset.view));
   });
-  document.getElementById("strip").addEventListener("click", ()=>setView("profil"));
+  document.getElementById("strip").addEventListener("click", ()=>{
+    if (stripScrub.moved) return;   // le geste était un balayage, pas un appui
+    setView("profil");
+  });
   document.getElementById("fab-profil").addEventListener("click", ()=>setView("profil"));
 
   document.getElementById("pv-scope").querySelectorAll("button").forEach(b=>{

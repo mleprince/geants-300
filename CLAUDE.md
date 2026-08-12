@@ -4,20 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository overview
 
-This repo contains a single self-contained pace-planning tool for "Les Géants 300", an ultra-distance cycling event. There is no build system, package manager, or test suite — the entire app is one static HTML file.
+This repo contains a self-contained pace-planning tool for "Les Géants 300", an ultra-distance cycling event. There is no build system, package manager, or test suite — it is plain static files served as-is.
 
-- `index.html` — the app: inline `<style>`, embedded fonts (base64 `data:font/ttf` URIs), an embedded `ROUTE` track (array of `{km, lat, lon, ele}` points, currently sampled every 0.1 km) inside a `<script>` tag, and the application logic in a second `<script>` (an IIFE).
-- `geants-2026.gpx` — the raw GPX source (COROS export) that the `ROUTE.track` data in the HTML was derived from. There is no script in this repo that performs the GPX → `ROUTE` conversion; if regenerating the embedded track, resample the GPX trkpts to a `{km, lat, lon, ele}` array (~0.1 km spacing) and paste it into the `ROUTE.track` literal in the HTML.
+- `index.html` — the page shell (~170 lines): meta tags, Leaflet CSS/JS from unpkg, then `style.css`, `route.js`, `app.js`. Must stay named `index.html` — GitHub Pages serves it at the site root.
+- `style.css` — all styling (~500 lines).
+- `route.js` — a single line: `const ROUTE = {meta: {...}, track: [{km, lat, lon, ele}, ...]}`, sampled every 0.1 km. ~200 KB on one line — never `Read` it whole, it exceeds tool token limits. Use `head -c` / `grep -o` to inspect fragments.
+- `app.js` — the application logic (~1070 lines), wrapped in `(function(){ ... })();`.
+- `geants-2026.gpx` — the raw GPX source (COROS export) that `ROUTE.track` was derived from. There is no script in this repo that performs the GPX → `ROUTE` conversion; if regenerating, resample the GPX trkpts to a `{km, lat, lon, ele}` array (~0.1 km spacing) and rewrite `route.js`.
 
-## Working with the HTML file
+## Deployment (GitHub Pages)
 
-The file is large (~1600 lines but with several very long lines — embedded font base64 blobs and the `ROUTE` JSON are each single lines with hundreds of KB). Do not try to `Read` the whole file at once; it exceeds tool token limits. Instead:
-- Use `grep -n` to locate line numbers for the section you need (CSS block, `ROUTE` literal, or the logic IIFE), then `Read` with `offset`/`limit` around those lines.
-- The CSS lives at the top inside `<style>...</style>` (includes the `@font-face` base64 blobs — skip over these when reading).
-- The `ROUTE` data is a single `<script>` tag containing one JS statement (`const ROUTE = {...}`).
-- The application logic is the following `<script>` tag, wrapped in `(function(){ "use strict"; ... })();`.
+The app is live at **https://mleprince.github.io/geants-300/**, served by GitHub Pages from the `main` branch, root path, of `mleprince/geants-300` (public).
 
-## Application logic (in the second `<script>`)
+Deploying a change is just a push — Pages rebuilds automatically in ~1 minute:
+
+```bash
+git add -A && git commit -m "..." && git push
+```
+
+Notes:
+- The remote uses **HTTPS**, not SSH (the SSH key was not available when the repo was set up). If a push asks for credentials, `gh auth git-credential` supplies them: `git -c credential.helper='!gh auth git-credential' push`.
+- Check the build status / verify a deploy:
+  ```bash
+  gh api repos/mleprince/geants-300/pages --jq .status   # "built" when done
+  curl -sS -o /dev/null -w "%{http_code}\n" https://mleprince.github.io/geants-300/
+  ```
+- All asset paths in `index.html` are **relative**, which is what makes the `/geants-300/` sub-path work. Do not switch them to absolute `/...` paths — that breaks Pages (it would resolve to the domain root).
+- Leaflet is loaded from unpkg with SRI hashes, so the map needs network on first load. If offline use in the mountains matters, vendor Leaflet into the repo instead.
+- `.gitignore` covers `.idea/`, `*.bak`, `.DS_Store`.
+
+## Application logic (`app.js`)
 
 The app derives everything from `ROUTE.track` at load time — there is no persistence beyond in-memory state and whatever the pause UI stores.
 
@@ -27,4 +43,4 @@ The app derives everything from `ROUTE.track` at load time — there is no persi
 4. **Pauses**: user-added and suggested stops (`buildSuggestions()` flags major cols above `MAJOR_ELE` and other POIs) are folded into the moving-time model to produce estimated elapsed/arrival times.
 5. **Rendering**: an SVG elevation profile (with gradient-colored segments matching the legend: flat/moderate climb/steep climb/descent), a schematic route/map panel, a splits table, and header stat tiles (distance, D+, start/finish/total time) — all built via DOM/SVG element construction in JS, no templating library.
 
-Any change to the pace model, gradient thresholds, or POI/col detection logic should be made directly in this IIFE; there are no separate modules to update.
+Any change to the pace model, gradient thresholds, or POI/col detection logic should be made directly in `app.js`; there are no separate modules to update.
