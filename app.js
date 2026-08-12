@@ -703,11 +703,40 @@ availableIcon(p) +
   /* ======================================================================
      11. Géolocalisation
      ====================================================================== */
-  let geoWatchId = null, geoMarker = null, geoCircle = null;
+  /* Sur téléphone, le premier point GPS haute précision peut demander bien plus
+     de temps qu'en Wi-Fi sur ordinateur, et le navigateur émet des erreurs
+     passagères (TIMEOUT, POSITION_UNAVAILABLE) avant d'accrocher les satellites.
+     On ne coupe donc le suivi que sur un refus de permission ; le reste est
+     signalé sans interrompre. Une première demande basse précision (réseau)
+     donne un point approximatif en quelques secondes en attendant le vrai fix. */
+  let geoWatchId = null, geoMarker = null, geoCircle = null, geoHasFix = false;
+  let geoMsgTimer = null;
+
+  function geoMessage(text, sticky){
+    const el = document.getElementById("geo-msg");
+    if (!el) return;
+    clearTimeout(geoMsgTimer);
+    if (!text){ el.classList.remove("is-on"); el.textContent = ""; return; }
+    el.textContent = text;
+    el.classList.add("is-on");
+    if (!sticky) geoMsgTimer = setTimeout(()=>geoMessage(""), 4000);
+  }
+
+  function setGeoBtnState(state){ // "off" | "wait" | "on"
+    const btn = document.getElementById("geoloc-toggle");
+    btn.setAttribute("aria-pressed", state === "off" ? "false" : "true");
+    btn.classList.toggle("is-waiting", state === "wait");
+    btn.title = state === "off" ? "Afficher ma position"
+      : state === "wait" ? "Recherche de la position…"
+      : "Suivi en cours — appuyer pour arrêter";
+  }
 
   function onGeoPosition(pos){
     const {latitude, longitude, accuracy} = pos.coords;
     const latlng = [latitude, longitude];
+    geoHasFix = true;
+    setGeoBtnState("on");
+    geoMessage("");
     if (!geoMarker){
       geoMarker = L.marker(latlng, {
         icon: L.divIcon({className:"geoloc-dot", iconSize:[16,16], iconAnchor:[8,8]}),
@@ -725,11 +754,25 @@ availableIcon(p) +
     setCursorKm(nearestKmToLatLng(latitude, longitude));
   }
 
+  function onGeoError(err){
+    // 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+    if (err.code === 1){
+      stopGeolocation();
+      geoMessage("Position refusée. Autorisez la localisation pour ce site " +
+                 "dans les réglages du navigateur.", true);
+      return;
+    }
+    if (geoHasFix) return; // simple décrochage passager, le suivi continue
+    geoMessage(err.code === 3
+      ? "Recherche du signal GPS… (sortez à découvert, ça peut prendre 1 min)"
+      : "Signal GPS indisponible pour l'instant — recherche en cours…", true);
+  }
+
   function stopGeolocation(){
     if (geoWatchId != null){ navigator.geolocation.clearWatch(geoWatchId); geoWatchId = null; }
-    const btn = document.getElementById("geoloc-toggle");
-    btn.setAttribute("aria-pressed", "false");
-    btn.title = "Afficher ma position";
+    geoHasFix = false;
+    setGeoBtnState("off");
+    geoMessage("");
     if (geoMarker) { map.removeLayer(geoMarker); geoMarker = null; }
     if (geoCircle) { map.removeLayer(geoCircle); geoCircle = null; }
   }
@@ -737,16 +780,27 @@ availableIcon(p) +
   document.getElementById("geoloc-toggle").addEventListener("click", ()=>{
     if (geoWatchId != null){ stopGeolocation(); return; }
     if (!navigator.geolocation){
-      alert("La géolocalisation n'est pas disponible sur cet appareil.");
+      geoMessage("La géolocalisation n'est pas disponible sur cet appareil.", true);
       return;
     }
-    const btn = document.getElementById("geoloc-toggle");
-    btn.setAttribute("aria-pressed", "true");
-    btn.title = "Suivi en cours — appuyer pour arrêter";
+    if (!window.isSecureContext){
+      geoMessage("La géolocalisation exige une connexion sécurisée (https).", true);
+      return;
+    }
+    geoHasFix = false;
+    setGeoBtnState("wait");
+    geoMessage("Recherche de la position…", true);
+
+    // point approximatif rapide (réseau) pour ne pas rester sans repère
+    navigator.geolocation.getCurrentPosition(
+      pos=>{ if (geoWatchId != null && !geoHasFix) onGeoPosition(pos); },
+      ()=>{},
+      {enableHighAccuracy:false, maximumAge:60000, timeout:8000}
+    );
+
     geoWatchId = navigator.geolocation.watchPosition(
-      onGeoPosition,
-      err=>{ stopGeolocation(); alert("Position indisponible : " + err.message); },
-      {enableHighAccuracy:true, maximumAge:5000, timeout:15000}
+      onGeoPosition, onGeoError,
+      {enableHighAccuracy:true, maximumAge:5000, timeout:60000}
     );
   });
 

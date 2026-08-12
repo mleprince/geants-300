@@ -10,7 +10,7 @@
  *
  * Bumper VERSION invalide les anciens caches à l'activation.
  */
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL = `geants300-shell-${VERSION}`;
 const VENDOR = `geants300-vendor-${VERSION}`;
 const TILES = "geants300-tiles";
@@ -109,18 +109,22 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // Navigation : réseau d'abord (pour récupérer les mises à jour), sinon cache.
+  // Navigation : on sert l'index du cache, comme les autres fichiers du shell.
+  // Servir un index.html frais par-dessus un app.js/style.css encore en cache
+  // mélangeait deux versions de l'app et la cassait ; le shell doit basculer
+  // d'un bloc, ce que fait le précache d'une nouvelle VERSION.
   if (req.mode === "navigate") {
     e.respondWith((async () => {
-      try {
-        const res = await fetch(req);
-        const cache = await caches.open(SHELL);
-        cache.put("index.html", res.clone());
+      const cache = await caches.open(SHELL);
+      const hit = (await cache.match("index.html")) || (await cache.match("./"));
+      const net = fetch(req).then((res) => {
+        if (res && res.ok) cache.put("index.html", res.clone());
         return res;
-      } catch (err) {
-        const cache = await caches.open(SHELL);
-        return (await cache.match("index.html")) || (await cache.match("./"));
-      }
+      }).catch(() => null);
+      if (hit) return hit;
+      const res = await net;
+      if (res) return res;
+      return new Response("Hors ligne", {status: 503, headers: {"Content-Type": "text/plain; charset=utf-8"}});
     })());
     return;
   }

@@ -57,6 +57,7 @@
         <div id="leaflet-map"></div>
         <div class="chips" id="poi-filters" role="group" aria-label="Filtrer les points d'intérêt"></div>
         <button class="fab" id="fab-profil" type="button" style="bottom:12px" title="Ouvrir le profil" aria-label="Ouvrir le profil">⛰</button>
+        <div class="geo-msg" id="geo-msg" role="status" aria-live="polite"></div>
       </div>
       <div class="sheet" id="sheet">
         <button class="sheet-grab" id="sheet-grab" type="button" aria-expanded="false" aria-controls="poi-list" aria-label="Déplier la liste des ravitaillements">
@@ -155,6 +156,15 @@
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function(){
       navigator.serviceWorker.register("sw.js").catch(function(){});
+    });
+    // Une nouvelle version du shell prend la main : on recharge une fois pour
+    // ne pas rester avec le HTML de l'ancienne version et le JS de la nouvelle.
+    // (pas au tout premier enregistrement : là il n'y a pas d'ancien HTML)
+    var reloaded = !navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", function(){
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
     });
   }
 </script>
